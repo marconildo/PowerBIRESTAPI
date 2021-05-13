@@ -13,8 +13,11 @@ section PowerBIRESTAPI;
 //
 // OAuth configuration settings
 //
+
 client_id = Text.FromBinary(Extension.Contents("AppID.txt"));  
+
 client_secret = Text.FromBinary(Extension.Contents("ClientSecret.txt"));
+
 redirect_uri = "https://oauth.powerbi.com/views/oauthredirect.html";
 token_uri = "https://login.windows.net/common/oauth2/token";
 authorize_uri = "https://login.windows.net/common/oauth2/authorize";
@@ -33,6 +36,7 @@ let
             {Extension.LoadString("AppWorkspace"),"AppWorkspace",AppWorkspacesNavTable(),"Folder","AppWorkspace",false},
             {Extension.LoadString("Gateways"),"Gateways",GatewaysNavTable(),"Folder","Gateways",false},
             {Extension.LoadString("Admin"),"Admin",AdminNavTable(),"Folder","Admin",false},
+            {Extension.LoadString("Experimental"),"Experimental",ExperimentalNavTable(),"Folder","Experimental",false},
             {"Functions","Functions",FunctionsNavTable(),"Folder","Functions",false}
         }),
         NavTable = Table.ToNavigationTable(objects,{"Key"},"Name","Data","ItemKind","ItemName","IsLeaf")
@@ -94,13 +98,23 @@ let
             {Extension.LoadString("GroupUsersAsAdmin"),"GroupUsersAsAdmin",PowerBIRESTAPI.GroupUsersAsAdmin(),"Table","Table",true},
             {Extension.LoadString("ReportsAsAdmin"),"ReportsAsAdmin",PowerBIRESTAPI.ReportsAsAdmin(),"Table","Table",true},
             {Extension.LoadString("DashboardsAsAdmin"),"DashboardsAsAdmin",PowerBIRESTAPI.DashboardsAsAdmin(),"Table","Table",true},
-            {Extension.LoadString("DatasetsAsAdmin"),"DatasetsAsAdmin",PowerBIRESTAPI.DatasetsAsAdmin(),"Table","Table",true},
             {Extension.LoadString("DataflowsAsAdmin"),"DataflowsAsAdmin",PowerBIRESTAPI.DataflowsAsAdmin(),"Table","Table",true},
-            {Extension.LoadString("DatasetDatasourcesAsAdmin"),"DatasetDatasourcesAsAdmin",PowerBIRESTAPI.DatasetDatasourcesAsAdmin(),"Table","Table",true},
-            {Extension.LoadString("DataflowDatasourcesAsAdmin"),"DataflowDatasourcesAsAdmin",PowerBIRESTAPI.DataflowDatasourcesAsAdmin(),"Table","Table",true},
-            {Extension.LoadString("CapacitiesAsAdmin"),"CapacitiesAsAdmin",PowerBIRESTAPI.CapacitiesAsAdmin(),"Table","Table",true}
+            {Extension.LoadString("CapacitiesAsAdmin"),"CapacitiesAsAdmin",PowerBIRESTAPI.CapacitiesAsAdmin(),"Table","Table",true},
+            {Extension.LoadString("CapacityRefreshablesAsAdmin"),"CapacityRefreshablesAsAdmin",PowerBIRESTAPI.CapacityRefreshablesAsAdmin(),"Table","Table",true}
         }),
         NavTable = Table.ToNavigationTable(objects, {"Key"},"Name","Data","ItemKind","ItemName","IsLeaf")
+in
+        NavTable;
+
+ExperimentalNavTable = () as table => 
+let
+        objects = #table(
+            {"Name","Key","Data","ItemKind","ItemName","IsLeaf"},{
+            {Extension.LoadString("GatewayDataSourceStatus"),"GatewayDataSourceStatus",PowerBIRESTAPI.GatewayDataSourceStatus(),"Table","Table",true},
+            {Extension.LoadString("DatasetDatasourcesAsAdmin"),"DatasetDatasourcesAsAdmin",PowerBIRESTAPI.DatasetDatasourcesAsAdmin(),"Table","Table",true},
+            {Extension.LoadString("DataflowDatasourcesAsAdmin"),"DataflowDatasourcesAsAdmin",PowerBIRESTAPI.DataflowDatasourcesAsAdmin(),"Table","Table",true}
+        }),
+        NavTable = Table.ToNavigationTable(objects,{"Key"},"Name","Data","ItemKind","ItemName","IsLeaf")
 in
         NavTable;
 
@@ -109,13 +123,34 @@ let
 	objects = #table(
             {"Name","Key","Data","ItemKind","ItemName","IsLeaf"},{
             {Extension.LoadString("GETData"),"GETData",PowerBIRESTAPI.GETData,"Function","GETData",true},
-            {"Activity Log", "ActivityLog", PowerBIRESTAPI.ActivityLog , "Function", "GetActivityLog", true}
+            {Extension.LoadString("GETRawData"),"GETRawData",PowerBIRESTAPI.GETRawData,"Function","GETRawData",true},
+            {"Event Activity Log", "EventActivityLog", PowerBIRESTAPI.EventActivityLog , "Function", "GetActivityLog", true}
         }),
 	NavTable = Table.ForceToNavigationTable(objects, {"Key"},"Name","Data","ItemKind","ItemName","IsLeaf")
 in
 	NavTable;
 
-PowerBIRESTAPI.ActivityLog = (startdate as date, enddate as date) =>
+
+PowerBIRESTAPI.EventActivityLog = Value.ReplaceType(ActivityLogPagination,ActivityLogType);
+
+ActivityLogType =type function (
+        startdate as ( type date meta[
+        Documentation.FieldCaption = "Start Date",
+        Documentation.FieldDescription = "Start date of your query"]),
+        enddate as ( type date meta[
+        Documentation.FieldCaption = "End Date",
+        Documentation.FieldDescription = "End date of your query"])) as table meta [                  
+        Documentation.Name = "PowerBIRESTAPI.ActivityLog",
+        Documentation.LongDescription = "Makes a call to the Power BI REST API Event Activity Log endpoint and returns the full response for the given date range",
+        Documentation.Examples = {[
+            Description = "Makes a call to the Power BI REST API Event Activity Log endpoint and returns the full response for the given date range",
+            Code = "=PowerBIRESTAPI.ActivityLog(#date(2020,1,1), #date(2020,1,9))
+            Get the full documentation at  https://msdn.microsoft.com/en-us/library/dn877544.aspx",
+            Result = "Table response for all event activity logs in the given date range"
+        ]}
+    ];
+
+ActivityLogPagination = (startdate as date, enddate as date) =>
     let
     Custom2 = List.Dates(startdate, Number.From(enddate - startdate ) + 1, Duration.From(1) ),
     Custom3 = List.Transform( Custom2, DateTime.From),
@@ -125,7 +160,7 @@ PowerBIRESTAPI.ActivityLog = (startdate as date, enddate as date) =>
     Custom7 = List.Zip({Custom4, Custom6 } ),
     Custom8 = List.Transform( Custom7, each "https://api.powerbi.com/v1.0/myorg/admin/activityevents?startDateTime='"& _{0} &"'&endDateTime='" & _{1}&"'"),
     GetData = List.Combine( List.Transform( Custom8,  GetActivityLog) ),
-    TransformedData = Table.FromRecords( List.Combine(GetData), null, MissingField.UseNull)
+    TransformedData = Table.Combine( List.Transform( List.Combine(GetData), each Table.FromRecords({_})) )
 in
     TransformedData;
 
@@ -199,6 +234,29 @@ shared PowerBIRESTAPI.GETData = Value.ReplaceType(GETData, GETDataType);
         Documentation.FieldCaption = "url Path",
         Documentation.FieldDescription = "Text string to be added to the https://api.powerbi.com/v1.0/myorg"])) as table meta [                  
         Documentation.Name = "PowerBIRESTAPI.GETData",
+        Documentation.LongDescription = "Makes a call to the Power BI REST API and returns the JSON response",
+        Documentation.Examples = {[
+            Description = "Returns raw data from any of the https://api.powerbi.com/v1.0/myorg endpoints. ",
+            Code = "=PowerBIRESTAPI.GETData(""datasets"")
+            Get the full documentation at  https://msdn.microsoft.com/en-us/library/dn877544.aspx",
+            Result = "JSON response for all the datasets in the Personal Workspace of the authenticated user."
+        ]}
+    ]; 
+
+GETData = (optional path as text) =>
+let
+	source = Json.Document(Web.Contents("https://api.powerbi.com/v1.0/myorg", [RelativePath = path]))
+in
+	source;
+
+[DataSource.Kind="PowerBIRESTAPI"]
+shared PowerBIRESTAPI.GETRawData = Value.ReplaceType(GETRawData, GETRawDataType);
+
+	GETRawDataType = type function (
+        optional path as ( type text meta[
+        Documentation.FieldCaption = "url Path",
+        Documentation.FieldDescription = "Text string to be added to the https://api.powerbi.com/v1.0/myorg"])) as table meta [                  
+        Documentation.Name = "PowerBIRESTAPI.GETRawData",
         Documentation.LongDescription = "Makes a call to the Power BI REST API and returns the raw response",
         Documentation.Examples = {[
             Description = "Returns raw data from any of the https://api.powerbi.com/v1.0/myorg endpoints. ",
@@ -208,11 +266,7 @@ shared PowerBIRESTAPI.GETData = Value.ReplaceType(GETData, GETDataType);
         ]}
     ]; 
 
-GETData = (optional path as text) =>
-let
-	source = Json.Document(Web.Contents("https://api.powerbi.com/v1.0/myorg", [RelativePath = path]))
-in
-	source;
+GETRawData = (optional path as text) => let source = Web.Contents("https://api.powerbi.com/v1.0/myorg",[RelativePath = path,ManualStatusHandling = {400}]) in source;
 
 [DataSource.Kind="PowerBIRESTAPI"]
 shared	PowerBIRESTAPI.GroupsList = () =>
@@ -349,6 +403,7 @@ let
 	ConnectionInfo = Table.AddColumn(ExtensionFull, "Connection Information", each if [Datasource Type] = "AnalysisServices" then [Server And Database] 
         else if [Datasource Type] = "ODBC" then [connectionString] 
         else if [Datasource Type] = "Sql" then [Server And Database] 
+        else if [Datasource Type] = "DB2" then [Server And Database] 
         else if [Datasource Type] = "File" then [path] 
         else if [Datasource Type] = "ActiveDirectory" then [domain] 
         else if [Datasource Type] = "Folder" then [path] 
@@ -391,12 +446,13 @@ let
 	expandDatasources = Table.ExpandRecordColumn(datasources, "Datasources", {"value"}, {"value"}),
 	toList = Table.ExpandListColumn(expandDatasources, "value"),
 	expandRecords = Table.ExpandRecordColumn(toList, "value", {"datasourceId", "gatewayId", "datasourceType", "connectionDetails"}, {"Datasource ID", "Gateway ID","Datasource Type", "connectionDetails"}),
-	expandConnectionDetails = Table.ExpandRecordColumn(expandRecords, "connectionDetails", {"url", "extensionDataSourcePath", "extensionDataSourceKind", "server", "database", "connectionString", "sharePointSiteUrl","emailAddress", "domain"}, {"url", "extensionDataSourcePath", "extensionDataSourceKind", "server", "database", "connectionString","sharePointSiteUrl", "emailAddress", "domain"}),
+	expandConnectionDetails = Table.ExpandRecordColumn(expandRecords, "connectionDetails", {"url", "extensionDataSourcePath", "extensionDataSourceKind", "server", "database", "connectionString", "sharePointSiteUrl","emailAddress", "domain","path"}, {"url", "extensionDataSourcePath", "extensionDataSourceKind", "server", "database", "connectionString","sharePointSiteUrl", "emailAddress", "domain","path"}),
 	ServerAndDB = Table.AddColumn(expandConnectionDetails,"Server And Database", each [server]&" | "&[database]),
 	ExtensionFull = Table.AddColumn(ServerAndDB, "ExtensionFull", each [extensionDataSourceKind] & " | " & [extensionDataSourcePath]),
 	ConnectionInfo = Table.AddColumn(ExtensionFull, "Connection Information", each if [Datasource Type] = "AnalysisServices" then [Server And Database] 
         else if [Datasource Type] = "ODBC" then [connectionString] 
         else if [Datasource Type] = "Sql" then [Server And Database] 
+        else if [Datasource Type] = "DB2" then [Server And Database] 
         else if [Datasource Type] = "File" then [path] 
         else if [Datasource Type] = "ActiveDirectory" then [domain] 
         else if [Datasource Type] = "Folder" then [path] 
@@ -411,7 +467,7 @@ let
         else if [Datasource Type] = "OleDb" then [connectionString] 
         else "Requires Mapping"),
 	filterNoDatasource = Table.SelectRows(ConnectionInfo, each ([Datasource Type] <> null)),
-	removeColumns = Table.RemoveColumns(filterNoDatasource,{"url", "extensionDataSourcePath", "extensionDataSourceKind", "server", "database", "connectionString", "sharePointSiteUrl","emailAddress", "domain", "Server And Database", "ExtensionFull"}),
+	removeColumns = Table.RemoveColumns(filterNoDatasource,{"url", "path", "extensionDataSourcePath", "extensionDataSourceKind", "server", "database", "connectionString", "sharePointSiteUrl","emailAddress", "domain", "Server And Database", "ExtensionFull"}),
 	ChangeType = Table.TransformColumnTypes(removeColumns,{{"Connection Information", type text}, {"Datasource Type", type text}, {"Gateway ID", type text}, {"Datasource ID", type text}, {"Dataflow ID", type text}, {"Workspace ID", type text}})
 in
 	ChangeType;
@@ -433,6 +489,29 @@ in
 	ChangeType;
 
 [DataSource.Kind="PowerBIRESTAPI"]
+	PowerBIRESTAPI.GatewayDataSourceStatus = () =>
+let
+	source = Json.Document(Web.Contents("https://api.powerbi.com/v1.0/myorg/gateways"))[value],
+	ToTable = Table.FromRecords(source),
+	columnNames = Table.RenameColumns(ToTable,{{"id", "Gateway ID"}}),
+	members = Table.AddColumn(columnNames, "Gateway Data Sources", each try Table.FromRecords(Json.Document(Web.Contents( "https://api.powerbi.com/v1.0/myorg/gateways/" & Text.From([Gateway ID])&"/datasources") )[value] ) otherwise null ),
+	Columns = Table.SelectColumns(members,{"Gateway ID", "Gateway Data Sources"}),
+	Expanded = Table.ExpandTableColumn(Columns, "Gateway Data Sources", {"id"}, {"Gateway Datasource ID"}),
+	datasources = Table.AddColumn(Expanded, "Status", each try Json.Document(Web.Contents( "https://api.powerbi.com/v1.0/myorg/gateways/"&[Gateway ID]&"/datasources/"&[Gateway Datasource ID]&"/status",[ManualStatusHandling = {400}]),65001) otherwise null),
+    filterToErrors = Table.SelectRows(datasources, each ([Status] <> null)),
+    expandStatus = Table.ExpandRecordColumn(filterToErrors, "Status", {"error"}, {"error"}),
+    expandError = Table.ExpandRecordColumn(expandStatus, "error", {"code", "pbi.error"}, {"Error Code", "error.pbi.error"}),
+    expandErrorDetail = Table.ExpandRecordColumn(expandError, "error.pbi.error", {"details"}, {"details"}),
+    expandErrorDetailList = Table.ExpandListColumn(expandErrorDetail, "details"),
+    expandErrorDetailValues = Table.ExpandRecordColumn(expandErrorDetailList, "details", {"code", "detail"}, {"error.pbi.error.details.code", "error.pbi.error.details.detail"}),
+    filterToMessages = Table.SelectRows(expandErrorDetailValues, each ([error.pbi.error.details.code] = "DM_ErrorDetailNameCode_UnderlyingErrorMessage")),
+    expandErrorDetailValue = Table.ExpandRecordColumn(filterToMessages, "error.pbi.error.details.detail", {"value"}, {"Error Value"}),
+    removeColumns = Table.SelectColumns(expandErrorDetailValue,{"Gateway ID", "Gateway Datasource ID", "Error Code", "Error Value"}),
+    changeType = Table.TransformColumnTypes(removeColumns,{{"Gateway ID", type text}, {"Gateway Datasource ID", type text}, {"Error Value", type text}, {"Error Code", type text}})
+in
+    changeType;
+
+[DataSource.Kind="PowerBIRESTAPI"]
 	PowerBIRESTAPI.GatewayDataSources = () =>
 let
 	source = Json.Document(Web.Contents("https://api.powerbi.com/v1.0/myorg/gateways"))[value],
@@ -448,6 +527,7 @@ let
 	ConnectionInfo = Table.AddColumn(ExtensionFull, "Connection Information", each if [Data Source Type] = "AnalysisServices" then [Server And Database] 
         else if [Data Source Type] = "ODBC" then [Connection String] 
         else if [Data Source Type] = "Sql" then [Server And Database] 
+        else if [Data Source Type] = "DB2" then [Server And Database]
         else if [Data Source Type] = "File" then [path] 
         else if [Data Source Type] = "ActiveDirectory" then [domain]
         else if [Data Source Type] = "Folder" then [path] 
@@ -573,7 +653,6 @@ let
 in
 	changeType;
 
-
 [DataSource.Kind="PowerBIRESTAPI"]
 	PowerBIRESTAPI.DataflowsAsAdmin = () =>
 let
@@ -597,13 +676,45 @@ in
 	changeType;
 
 [DataSource.Kind="PowerBIRESTAPI"]
+	PowerBIRESTAPI.CapacityRefreshablesAsAdmin = () =>
+let
+	source = PowerBIRESTAPI.CapacitiesAsAdmin(),
+	trimColumns = Table.SelectColumns(source,{"Capacity ID"}),
+    apiCall = Table.AddColumn(trimColumns, "Capacity Refreshables", each try Table.FromRecords(Json.Document(Web.Contents("https://api.powerbi.com/v1.0/myorg/admin/capacities/" & Text.From([Capacity ID])&"/refreshables?$expand=group"))[value],{"id", "name", "kind", "lastRefresh", "refreshSchedule", "configuredBy", "group"},MissingField.UseNull) otherwise null ),
+    expandCapacityRefreshables = Table.ExpandTableColumn(apiCall, "Capacity Refreshables", {"id", "name", "kind", "lastRefresh", "refreshSchedule", "configuredBy", "group"}, {"Capacity Refreshable ID", "Capacity Refreshable Name", "Capacity Refreshable Kind", "lastRefresh", "refreshSchedule", "configuredBy", "group"}),
+    filterNoRefreshables = Table.SelectRows(expandCapacityRefreshables, each ([Capacity Refreshable ID] <> null)),
+    expandRefreshSchedule = Table.ExpandRecordColumn(filterNoRefreshables, "refreshSchedule", {"days", "times", "enabled", "localTimeZoneId", "notifyOption"}, {"Refresh Schedule Days", "Refresh Schedule Times", "Refresh Enabled", "Time Zone", "Notify Option"}),
+    extractedDays = Table.TransformColumns(expandRefreshSchedule, {"Refresh Schedule Days", each Text.Combine(List.Transform(_, Text.From), ","), type text}),
+    replaceEveryday = Table.ReplaceValue(extractedDays,"Sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday","Everyday",Replacer.ReplaceText,{"Refresh Schedule Days"}),
+    replacedWeekday = Table.ReplaceValue(replaceEveryday,"Monday,Tuesday,Wednesday,Thursday,Friday","Every Weekday",Replacer.ReplaceText,{"Refresh Schedule Days"}),
+    extractedTimes = Table.TransformColumns(replacedWeekday, {"Refresh Schedule Times", each Text.Combine(List.Transform(_, Text.From), ","), type text}),
+    expandConfiguredBy = Table.ExpandListColumn(extractedTimes, "configuredBy"),
+    expandGroup = Table.ExpandRecordColumn(expandConfiguredBy, "group", {"id"}, {"Workspace ID"}),
+    expandLastRefresh = Table.ExpandRecordColumn(expandGroup, "lastRefresh", {"id", "refreshType", "startTime", "endTime", "serviceExceptionJson", "status", "requestId"}, {"Last Refresh ID", "Last Refresh Type", "Last Refresh Start Time", "Last Refresh End Time", "serviceExceptionJson", "Last Refresh Status", "Last Refresh Request ID"}),
+    #"Parsed JSON" = Table.TransformColumns(expandLastRefresh,{{"serviceExceptionJson", Json.Document}}),
+    #"Replaced Errors" = Table.ReplaceErrorValues(#"Parsed JSON", {{"serviceExceptionJson", null}}),
+    #"Expanded serviceExceptionJson" = Table.ExpandRecordColumn(#"Replaced Errors", "serviceExceptionJson", {"error"}, {"error"}),
+    #"Expanded error" = Table.ExpandRecordColumn(#"Expanded serviceExceptionJson", "error", {"code", "pbi.error"}, {"Last Refresh Error Code", "pbi.error"}),
+    #"Expanded pbi.error" = Table.ExpandRecordColumn(#"Expanded error", "pbi.error", {"details"}, {"details"}),
+    #"Expanded details2" = Table.ExpandListColumn(#"Expanded pbi.error", "details"),
+    #"Expanded details1" = Table.ExpandRecordColumn(#"Expanded details2", "details", {"code", "detail"}, {"Last Refresh Error Label", "detail"}),
+    #"Filtered Rows" = Table.SelectRows(#"Expanded details1", each ([Last Refresh Error Label] <> "ActivityIdText" and [Last Refresh Error Label] <> "ClusterUriText" and [Last Refresh Error Label] <> "RequestIdText" and [Last Refresh Error Label] <> "TimestampText")),
+    #"Expanded detail" = Table.ExpandRecordColumn(#"Filtered Rows", "detail", {"value"}, {"Last Refresh Error Value"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Expanded detail",{{"Capacity Refreshable ID", type text}, {"Capacity Refreshable Name", type text}, {"Capacity Refreshable Kind", type text}, {"Last Refresh Type", type text}, {"Last Refresh Status", type text}, {"Last Refresh Request ID", type text}, {"Refresh Schedule Days", type text}, {"Refresh Schedule Times", type text}, {"Time Zone", type text}, {"Notify Option", type text}, {"configuredBy", type text}, {"Workspace ID", type text}, {"Last Refresh ID", Int64.Type}, {"Last Refresh Start Time", type datetimezone}, {"Last Refresh End Time", type datetimezone}, {"Last Refresh Error Code", type text}, {"Last Refresh Error Label", type text}, {"Last Refresh Error Value", type text}, {"Refresh Enabled", type text}}),
+    #"Replaced Value" = Table.ReplaceValue(#"Changed Type","false","No",Replacer.ReplaceText,{"Refresh Enabled"}),
+    #"Replaced Value1" = Table.ReplaceValue(#"Replaced Value","true","Yes",Replacer.ReplaceText,{"Refresh Enabled"})
+in
+    #"Replaced Value1";
+
+[DataSource.Kind="PowerBIRESTAPI"]
 	PowerBIRESTAPI.DatasetDatasourcesAsAdmin = () =>
 let
 	source = PowerBIRESTAPI.DatasetsAsAdmin(),
 	trimColumns = Table.SelectColumns(source,{"Dataset ID"}),
-	datasources = Table.AddColumn(trimColumns, "datasources", each try Table.FromRecords(Json.Document(Web.Contents( "https://api.powerbi.com/v1.0/myorg/admin/datasets/" & Text.From([Dataset ID])&"/datasources") )[value] ) otherwise null ),
+	datasources = Table.AddColumn(trimColumns, "datasources", each try Table.FromRecords(Json.Document(Web.Contents( "https://api.powerbi.com/v1.0/myorg/admin/datasets/" & Text.From([Dataset ID])&"/datasources") )[value],{"datasourceType", "connectionDetails", "datasourceId", "gatewayId"},MissingField.UseNull) otherwise null ),
 	expandDatasources = Table.ExpandTableColumn(datasources, "datasources", {"datasourceType", "connectionDetails", "datasourceId", "gatewayId"}, {"Datasource Type", "connectionDetails", "Datasource ID", "Gateway ID"}),
-	expandConnectionDetails = Table.ExpandRecordColumn(expandDatasources, "connectionDetails", {"path", "kind", "connectionString", "extensionDataSourceKind", "extensionDataSourcePath", "account", "domain", "server", "database", "sharePointSiteUrl", "url"}, {"path", "kind", "connectionString", "extensionDataSourceKind", "extensionDataSourcePath", "account", "domain", "server", "database", "sharePointSiteUrl", "url"}),
+	filterNoRefreshables = Table.SelectRows(expandDatasources, each ([Datasource ID] <> null)),
+	expandConnectionDetails = Table.ExpandRecordColumn(filterNoRefreshables, "connectionDetails", {"path", "kind", "connectionString", "extensionDataSourceKind", "extensionDataSourcePath", "account", "domain", "server", "database", "sharePointSiteUrl", "url"}, {"path", "kind", "connectionString", "extensionDataSourceKind", "extensionDataSourcePath", "account", "domain", "server", "database", "sharePointSiteUrl", "url"}),
 	ServerAndDB = Table.AddColumn(expandConnectionDetails,"Server And Database", each [server]&" | "&[database]),
 	ExtensionFull = Table.AddColumn(ServerAndDB, "ExtensionFull", each [kind] & " | " & [path]),
 	ConnectionInfo = Table.AddColumn(ExtensionFull, "Connection Information", each if [Datasource Type] = "AnalysisServices" then [Server And Database] 
@@ -613,6 +724,7 @@ let
         else if [Datasource Type] = "Folder" then [path] 
         else if [Datasource Type] = "Web" then [url] 
         else if [Datasource Type] = "MySql" then [Server And Database] 
+        else if [Datasource Type] = "DB2" then [Server And Database] 
         else if [Datasource Type] = "OData" then [url] 
         else if [Datasource Type] = "SharePointList" then [url] 
         else if [Datasource Type] = "Extension" then [ExtensionFull]  
@@ -622,18 +734,20 @@ let
         else if [Datasource Type] = "OleDb" then [connectionString] 
         else if [Datasource Type] = "AzureBlobs" then [account]&" | "&[domain] 
         else "Requires Mapping"),
-	filterNoDatasource = Table.SelectRows(ConnectionInfo, each ([Datasource Type] <> null))
+	removeColumns = Table.SelectColumns(ConnectionInfo,{"Dataset ID", "Datasource ID", "Gateway ID", "Connection Information", "Datasource Type"}),
+	changeType = Table.TransformColumnTypes(removeColumns,{{"Datasource ID", type text}, {"Gateway ID", type text}, {"Connection Information", type text}, {"Datasource Type", type text}})
 in
-	filterNoDatasource;
+	changeType;
 
 [DataSource.Kind="PowerBIRESTAPI"]
 	PowerBIRESTAPI.DataflowDatasourcesAsAdmin = () =>
 let
 	source = PowerBIRESTAPI.DataflowsAsAdmin(),
 	trimColumns = Table.SelectColumns(source,{"Dataflow ID"}),
-	datasources = Table.AddColumn(trimColumns, "datasources", each try Table.FromRecords(Json.Document(Web.Contents( "https://api.powerbi.com/v1.0/myorg/admin/dataflows/" & Text.From([Dataflow ID])&"/datasources") )[value] ) otherwise null ),
+    datasources = Table.AddColumn(trimColumns, "datasources", each try Table.FromRecords(Json.Document(Web.Contents("https://api.powerbi.com/v1.0/myorg/admin/dataflows/" & Text.From([Dataflow ID])&"/datasources"))[value],{"datasourceType", "connectionDetails", "datasourceId", "gatewayId"},MissingField.UseNull) otherwise null ),
 	expandDatasources = Table.ExpandTableColumn(datasources, "datasources", {"datasourceType", "connectionDetails", "datasourceId", "gatewayId"}, {"Datasource Type", "connectionDetails", "Datasource ID", "Gateway ID"}),
-	expandConnectionDetails = Table.ExpandRecordColumn(expandDatasources, "connectionDetails", {"path", "connectionString", "extensionDataSourceKind", "extensionDataSourcePath", "account", "domain", "server", "database", "sharePointSiteUrl", "url"}, {"path", "connectionString", "extensionDataSourceKind", "extensionDataSourcePath", "account", "domain", "server", "database", "sharePointSiteUrl", "url"}),
+	filterNoRefreshables = Table.SelectRows(expandDatasources, each ([Datasource ID] <> null)),
+    expandConnectionDetails = Table.ExpandRecordColumn(filterNoRefreshables, "connectionDetails", {"path", "connectionString", "extensionDataSourceKind", "extensionDataSourcePath", "account", "domain", "server", "database", "sharePointSiteUrl", "url"}, {"path", "connectionString", "extensionDataSourceKind", "extensionDataSourcePath", "account", "domain", "server", "database", "sharePointSiteUrl", "url"}),
 	ServerAndDB = Table.AddColumn(expandConnectionDetails,"Server And Database", each [server]&" | "&[database]),
 	ExtensionFull = Table.AddColumn(ServerAndDB, "ExtensionFull", each [extensionDataSourceKind] & " | " & [extensionDataSourcePath]),
 	ConnectionInfo = Table.AddColumn(ExtensionFull, "Connection Information", each if [Datasource Type] = "AnalysisServices" then [Server And Database] 
@@ -644,6 +758,7 @@ let
 		else if [Datasource Type] = "Folder" then [path] 
 		else if [Datasource Type] = "Web" then [url] 
 		else if [Datasource Type] = "MySql" then [Server And Database] 
+		else if [Datasource Type] = "DB2" then [Server And Database] 
 		else if [Datasource Type] = "OData" then [url] 
 		else if [Datasource Type] = "SharePointList" then [sharePointSiteUrl] 
 		else if [Datasource Type] = "Extension" then [ExtensionFull]  
@@ -653,8 +768,7 @@ let
 		else if [Datasource Type] = "OleDb" then [connectionString] 
 		else if [Datasource Type] = "AzureBlobs" then [account]&" | "&[domain] 
 		else "Requires Mapping"),
-	filterNoDatasource = Table.SelectRows(ConnectionInfo, each ([Datasource Type] <> null)),
-	removeColumns = Table.SelectColumns(filterNoDatasource,{"Dataflow ID", "Datasource ID", "Gateway ID", "Connection Information", "Datasource Type"}),
+	removeColumns = Table.SelectColumns(ConnectionInfo,{"Dataflow ID", "Datasource ID", "Gateway ID", "Connection Information", "Datasource Type"}),
 	changeType = Table.TransformColumnTypes(removeColumns,{{"Datasource ID", type text}, {"Gateway ID", type text}, {"Connection Information", type text}, {"Datasource Type", type text}})
 in
 	changeType;
@@ -665,12 +779,8 @@ in
 PowerBIRESTAPI = [
 TestConnection = (dataSourcePath) =>  { "PowerBIRESTAPI.Navigation"},
     Authentication = [
-        OAuth = [
-            StartLogin=StartLogin,
-            FinishLogin=FinishLogin,
-            Refresh=Refresh,
-            Logout=Logout
-        ]
+       Aad =  [AuthorizationUri = authorize_uri,
+            Resource = resourceUri]            
     ],
     Label = Extension.LoadString("DataSourceLabel") 
 ];
@@ -691,113 +801,7 @@ PBIAPI.Icons = [
     Icon32 = { Extension.Contents("PBIAPI32.png"), Extension.Contents("PBIAPI40.png"), Extension.Contents("PBIAPI48.png"), Extension.Contents("PBIAPI64.png") }
 ];
 
-//
-// OAuth implementation
-//
-// See the following links for more details on AAD/Graph OAuth:
-// * https://docs.microsoft.com/en-us/azure/active-directory/active-directory-protocols-oauth-code 
-// * https://graph.microsoft.io/en-us/docs/authorization/app_authorization
-//
-// StartLogin builds a record containing the information needed for the client
-// to initiate an OAuth flow. Note for the AAD flow, the display parameter is
-// not used.
-//
-// resourceUrl: Derived from the required arguments to the data source function
-//              and is used when the OAuth flow requires a specific resource to 
-//              be passed in, or the authorization URL is calculated (i.e. when
-//              the tenant name/ID is included in the URL). In this example, we
-//              are hardcoding the use of the "common" tenant, as specified by
-//              the 'authorize_uri' variable.
-// state:       Client state value we pass through to the service.
-// display:     Used by certain OAuth services to display information to the
-//              user.
-//
-// Returns a record containing the following fields:
-// LoginUri:     The full URI to use to initiate the OAuth flow dialog.
-// CallbackUri:  The return_uri value. The client will consider the OAuth
-//               flow complete when it receives a redirect to this URI. This
-//               generally needs to match the return_uri value that was
-//               registered for your application/client. 
-// WindowHeight: Suggested OAuth window height (in pixels).
-// WindowWidth:  Suggested OAuth window width (in pixels).
-// Context:      Optional context value that will be passed in to the FinishLogin
-//               function once the redirect_uri is reached. 
-//
-StartLogin = (resourceUrl, state, display) =>
-    let
-        authorizeUrl = authorize_uri & "?" & Uri.BuildQueryString([
-            client_id = client_id,  
-            redirect_uri = redirect_uri,
-            state = state,
-            response_type = "code",
-            response_mode = "query",
-            resource = resourceUri
-        ])
-    in
-        [
-            LoginUri = authorizeUrl,
-            CallbackUri = redirect_uri,
-            WindowHeight = 720,
-            WindowWidth = 1024,
-            Context = null
-        ];
 
-// FinishLogin is called when the OAuth flow reaches the specified redirect_uri. 
-// Note for the AAD flow, the context and state parameters are not used. 
-//
-// context:     The value of the Context field returned by StartLogin. Use this to 
-//              pass along information derived during the StartLogin call (such as
-//              tenant ID)
-// callbackUri: The callbackUri containing the authorization_code from the service.
-// state:       State information that was specified during the call to StartLogin. 
-FinishLogin = (context, callbackUri, state) =>
-    let
-        // parse the full callbackUri, and extract the Query string
-        parts = Uri.Parts(callbackUri)[Query],
-        // if the query string contains an "error" field, raise an error
-        // otherwise call TokenMethod to exchange our code for an access_token
-        result = if (Record.HasFields(parts, {"error", "error_description"})) then 
-                    error Error.Record(parts[error], parts[error_description], parts)
-                 else
-                    TokenMethod("authorization_code", "code", parts[code])
-    in
-        result;
-
-// Called when the access_token has expired, and a refresh_token is available.
-// 
-Refresh = (resourceUrl, refresh_token) => TokenMethod("refresh_token", "refresh_token", refresh_token);
-
-Logout = (token) => logout_uri;
-
-
-// grantType:  Maps to the "grant_type" query parameter.
-// tokenField: The name of the query parameter to pass in the code.
-// code:       Is the actual code (authorization_code or refresh_token) to send to the service.
-TokenMethod = (grantType, tokenField, code) =>
-    let
-        queryString = [
-            client_id = client_id,
-            resource = resourceUri,
-            grant_type = grantType,
-            redirect_uri = redirect_uri
-        ],
-        queryWithCode = Record.AddField(queryString, tokenField, code),
-
-        tokenResponse = Web.Contents(token_uri, [
-            Content = Text.ToBinary(Uri.BuildQueryString(queryWithCode)),
-            Headers = [
-                #"Content-type" = "application/x-www-form-urlencoded",
-                #"Accept" = "application/json"
-            ],
-            ManualStatusHandling = {400} 
-        ]),
-        body = Json.Document(tokenResponse),
-        result = if (Record.HasFields(body, {"error", "error_description"})) then 
-                    error Error.Record(body[error], body[error_description], body)
-                 else
-                    body
-    in
-        result;
 
 Table.ToNavigationTable = (
     table as table,
